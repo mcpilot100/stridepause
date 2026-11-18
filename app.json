@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "StridePause",
+    "slug": "stridepause",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0F0A",
+    "ios": {
+      "bundleIdentifier": "com.stridepause.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.stridepause.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0F0A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "StridePause uses your location to measure your pace, distance and route while you run.",
+          "locationAlwaysAndWhenInUsePermission": "Choose \"Always\" so StridePause keeps tracking your run when the app is minimized or you switch to music.",
+          "locationAlwaysPermission": "Choose \"Always\" so StridePause keeps tracking your run when the app is minimized or you switch to music.",
+          "motionUsagePermission": false,
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
