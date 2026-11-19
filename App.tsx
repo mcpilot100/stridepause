@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { VoiceSettings } from './src/components/VoiceSettings';
 import {
   ensurePermissions,
   isTracking,
@@ -127,7 +128,7 @@ function RunScreen() {
   };
 
   const points = run?.points ?? [];
-  const distanceM = totalDistanceM(points);
+  const distanceM = run?.distanceM ?? totalDistanceM(points);
   const elapsed = run ? now - run.startedAt : 0;
   const lastFix = points.length ? points[points.length - 1] : null;
   const lastFixAge = lastFix ? Math.max(0, Math.round((now - lastFix.t) / 1000)) : null;
@@ -137,7 +138,7 @@ function RunScreen() {
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={s.content}>
         <Text style={s.eyebrow}>STRIDE</Text>
-        <Text style={s.title}>Background test</Text>
+        <Text style={s.title}>Today's run</Text>
 
         <View style={s.statusRow}>
           <View style={[s.dot, { backgroundColor: tracking ? C.lime : C.muted }]} />
@@ -191,6 +192,10 @@ function RunScreen() {
           Start a run, then switch to Spotify or lock your phone. When you come back, this screen
           shows how many GPS points were recorded while the app was hidden.
         </Text>
+
+        <View style={{ marginTop: 28 }}>
+          <VoiceSettings />
+        </View>
 
         {history.length > 0 && (
           <>
