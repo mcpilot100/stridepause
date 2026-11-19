@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { loadSettings } from '../settings';
 import { STORAGE_KEYS } from './constants';
+import { ingestPoints, movingMsAt, pausedMsAt } from './cues';
 import { totalDistanceM } from './geo';
 import type { ActiveRun, SavedRun, TrackPoint } from './types';
 
@@ -28,18 +30,30 @@ export function beginRun(): Promise<ActiveRun> {
       id: String(Date.now()),
       startedAt: Date.now(),
       points: [],
+      distanceM: 0,
+      lastGood: null,
+      mileMoving: [],
+      fuelCount: 0,
+      paused: false,
+      stillSince: null,
+      movingStreak: 0,
+      pauses: [],
     };
     await AsyncStorage.setItem(STORAGE_KEYS.activeRun, JSON.stringify(run));
     return run;
   });
 }
 
-export function appendPoints(points: TrackPoint[]): Promise<void> {
+/** Saves new fixes and returns any voice cues (mile updates, fuel reminders) now due. */
+export function appendPoints(points: TrackPoint[]): Promise<string[]> {
   return serial(async () => {
     const run = await readJSON<ActiveRun>(STORAGE_KEYS.activeRun);
-    if (!run) return; // run already stopped; drop late fixes
-    run.points.push(...points.filter((p) => p.t >= run.startedAt));
+    if (!run) return []; // run already stopped; drop late fixes
+    const settings = await loadSettings();
+    const fresh = points.filter((p) => p.t >= run.startedAt).sort((a, b) => a.t - b.t);
+    const phrases = ingestPoints(run, fresh, settings);
     await AsyncStorage.setItem(STORAGE_KEYS.activeRun, JSON.stringify(run));
+    return phrases;
   });
 }
 
@@ -47,10 +61,16 @@ export function finishRun(): Promise<SavedRun | null> {
   return serial(async () => {
     const run = await readJSON<ActiveRun>(STORAGE_KEYS.activeRun);
     if (!run) return null;
+    const endedAt = Date.now();
+    const open = run.pauses?.[run.pauses.length - 1];
+    if (open && open.end == null) open.end = endedAt;
     const saved: SavedRun = {
       ...run,
-      endedAt: Date.now(),
-      distanceM: totalDistanceM(run.points),
+      paused: false,
+      endedAt,
+      distanceM: run.distanceM ?? totalDistanceM(run.points),
+      movingMs: movingMsAt(run, endedAt),
+      pausedMs: pausedMsAt(run, endedAt),
     };
     const history = (await readJSON<SavedRun[]>(STORAGE_KEYS.runHistory)) ?? [];
     history.unshift(saved);

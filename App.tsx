@@ -1,8 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
-  AppState,
   Linking,
   Pressable,
   ScrollView,
@@ -12,6 +11,9 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { RunDetail, runMovingMs } from './src/components/RunDetail';
+import { VoiceSettings } from './src/components/VoiceSettings';
+import { movingMsAt, pausedMsAt } from './src/tracking/cues';
 import {
   ensurePermissions,
   isTracking,
@@ -31,9 +33,8 @@ const C = {
   lime: '#B8F04A',
   limeDim: '#2A3A12',
   red: '#E5484D',
+  amber: '#F5B841',
 };
-
-type BackgroundReport = { awayMs: number; points: number };
 
 export default function App() {
   return (
@@ -48,9 +49,8 @@ function RunScreen() {
   const [tracking, setTracking] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [history, setHistory] = useState<SavedRun[]>([]);
-  const [report, setReport] = useState<BackgroundReport | null>(null);
+  const [openRun, setOpenRun] = useState<SavedRun | null>(null);
   const [busy, setBusy] = useState(false);
-  const leftAt = useRef<{ t: number; points: number } | null>(null);
 
   const refresh = useCallback(async () => {
     const [active, on] = await Promise.all([getActiveRun(), isTracking()]);
@@ -65,27 +65,6 @@ function RunScreen() {
     getRunHistory().then(setHistory);
     const id = setInterval(refresh, 1000);
     return () => clearInterval(id);
-  }, [refresh]);
-
-  // The key test: how many GPS points arrived while the app was hidden?
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', async (state) => {
-      if (state === 'background') {
-        const active = await getActiveRun();
-        leftAt.current = active ? { t: Date.now(), points: active.points.length } : null;
-      } else if (state === 'active' && leftAt.current) {
-        const active = await refresh();
-        const before = leftAt.current;
-        leftAt.current = null;
-        if (active) {
-          setReport({
-            awayMs: Date.now() - before.t,
-            points: active.points.length - before.points,
-          });
-        }
-      }
-    });
-    return () => sub.remove();
   }, [refresh]);
 
   const onStart = async () => {
@@ -105,7 +84,6 @@ function RunScreen() {
         );
         return;
       }
-      setReport(null);
       await startTracking();
       await refresh();
     } catch (e) {
@@ -127,51 +105,47 @@ function RunScreen() {
   };
 
   const points = run?.points ?? [];
-  const distanceM = totalDistanceM(points);
-  const elapsed = run ? now - run.startedAt : 0;
+  const distanceM = run?.distanceM ?? totalDistanceM(points);
+  const moving = run ? movingMsAt(run, now) : 0;
+  const pausedMs = run ? pausedMsAt(run, now) : 0;
+  const isPaused = tracking && !!run?.paused;
   const lastFix = points.length ? points[points.length - 1] : null;
   const lastFixAge = lastFix ? Math.max(0, Math.round((now - lastFix.t) / 1000)) : null;
+
+  if (openRun) return <RunDetail run={openRun} onBack={() => setOpenRun(null)} />;
 
   return (
     <SafeAreaView style={s.root}>
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={s.content}>
         <Text style={s.eyebrow}>STRIDE</Text>
-        <Text style={s.title}>Background test</Text>
+        <Text style={s.title}>Today's run</Text>
 
         <View style={s.statusRow}>
-          <View style={[s.dot, { backgroundColor: tracking ? C.lime : C.muted }]} />
-          <Text style={s.statusText}>
-            {tracking
-              ? lastFixAge == null
-                ? 'WAITING FOR GPS'
-                : `TRACKING · LAST FIX ${lastFixAge}s AGO`
-              : 'READY'}
+          <View
+            style={[s.dot, { backgroundColor: isPaused ? C.amber : tracking ? C.lime : C.muted }]}
+          />
+          <Text style={[s.statusText, isPaused && { color: C.amber }]}>
+            {!tracking
+              ? 'READY'
+              : isPaused
+                ? 'AUTO-PAUSED'
+                : lastFixAge == null || lastFixAge > 10
+                  ? 'WAITING FOR GPS'
+                  : 'TRACKING'}
           </Text>
         </View>
 
         <View style={s.ring}>
-          <Text style={s.pace}>{formatPace(elapsed, distanceM)}</Text>
+          <Text style={s.pace}>{formatPace(moving, distanceM)}</Text>
           <Text style={s.ringLabel}>AVG PACE / MI</Text>
         </View>
 
         <View style={s.stats}>
           <Stat label="DISTANCE" value={metersToMiles(distanceM).toFixed(2)} />
-          <Stat label="ELAPSED" value={formatDuration(elapsed)} />
-          <Stat label="GPS POINTS" value={String(points.length)} />
+          <Stat label="MOVING" value={formatDuration(moving)} />
+          <Stat label="PAUSED" value={formatDuration(pausedMs)} />
         </View>
-
-        {report && (
-          <View style={[s.report, report.points > 0 ? s.reportOk : s.reportBad]}>
-            <Text style={s.reportTitle}>
-              {report.points > 0 ? 'Background tracking worked' : 'No points while minimized'}
-            </Text>
-            <Text style={s.reportBody}>
-              Away for {formatDuration(report.awayMs)} and recorded {report.points} GPS points
-              {report.points > 0 ? '.' : '. Check that location is set to "Always".'}
-            </Text>
-          </View>
-        )}
 
         <Pressable
           disabled={busy}
@@ -187,16 +161,19 @@ function RunScreen() {
           </Text>
         </Pressable>
 
-        <Text style={s.hint}>
-          Start a run, then switch to Spotify or lock your phone. When you come back, this screen
-          shows how many GPS points were recorded while the app was hidden.
-        </Text>
+        <View style={{ marginTop: 28 }}>
+          <VoiceSettings />
+        </View>
 
         {history.length > 0 && (
           <>
             <Text style={[s.eyebrow, { marginTop: 28 }]}>SAVED RUNS</Text>
             {history.slice(0, 10).map((r) => (
-              <View key={r.id} style={s.historyRow}>
+              <Pressable
+                key={r.id}
+                onPress={() => setOpenRun(r)}
+                style={({ pressed }) => [s.historyRow, pressed && { opacity: 0.7 }]}
+              >
                 <Text style={s.historyDate}>
                   {new Date(r.startedAt).toLocaleString(undefined, {
                     month: 'short',
@@ -207,10 +184,10 @@ function RunScreen() {
                 </Text>
                 <Text style={s.historyMain}>
                   {metersToMiles(r.distanceM).toFixed(2)} mi ·{' '}
-                  {formatDuration(r.endedAt - r.startedAt)} ·{' '}
-                  {formatPace(r.endedAt - r.startedAt, r.distanceM)}/mi · {r.points.length} pts
+                  {formatDuration(runMovingMs(r))} · {formatPace(runMovingMs(r), r.distanceM)}/mi
                 </Text>
-              </View>
+                <Text style={s.chevron}>›</Text>
+              </Pressable>
             ))}
           </>
         )}
@@ -262,16 +239,10 @@ const s = StyleSheet.create({
   stat: { flex: 1, alignItems: 'center', paddingVertical: 16 },
   statValue: { color: C.text, fontSize: 20, fontWeight: '700', ...mono },
   statLabel: { color: C.muted, fontSize: 10, letterSpacing: 1.5, marginTop: 4 },
-  report: { marginTop: 16, padding: 14, borderRadius: 14, borderWidth: 1 },
-  reportOk: { borderColor: C.lime, backgroundColor: C.limeDim },
-  reportBad: { borderColor: C.red, backgroundColor: '#2A1414' },
-  reportTitle: { color: C.text, fontWeight: '700', fontSize: 15 },
-  reportBody: { color: C.text, marginTop: 4, fontSize: 13 },
   button: { marginTop: 24, borderRadius: 999, paddingVertical: 16, alignItems: 'center' },
   buttonStart: { backgroundColor: C.lime },
   buttonStop: { backgroundColor: 'transparent', borderWidth: 1, borderColor: C.red },
   buttonText: { color: '#0B0F0A', fontSize: 16, fontWeight: '700' },
-  hint: { color: C.muted, fontSize: 13, marginTop: 14, lineHeight: 19, textAlign: 'center' },
   historyRow: {
     marginTop: 10,
     padding: 14,
@@ -282,4 +253,5 @@ const s = StyleSheet.create({
   },
   historyDate: { color: C.muted, fontSize: 11, letterSpacing: 1 },
   historyMain: { color: C.text, fontSize: 15, marginTop: 4, ...mono },
+  chevron: { position: 'absolute', right: 16, top: 18, color: C.muted, fontSize: 22 },
 });
