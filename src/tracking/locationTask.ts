@@ -4,6 +4,7 @@ import type { LocationObject } from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
 import { LOCATION_TASK } from './constants';
+import { say } from '../speech';
 import { appendPoints } from './runStore';
 import type { TrackPoint } from './types';
 
@@ -23,6 +24,7 @@ TaskManager.defineTask<{ locations: LocationObject[] }>(
       acc: l.coords.accuracy ?? null,
       speed: l.coords.speed ?? null,
     }));
-    await appendPoints(points);
+    const phrases = await appendPoints(points);
+    for (const phrase of phrases) say(phrase);
   },
 );
