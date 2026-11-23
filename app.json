@@ -2,7 +2,7 @@
   "expo": {
     "name": "StridePause",
     "slug": "stridepause",
-    "version": "0.3.1",
+    "version": "0.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -63,7 +63,8 @@
           "enableBackgroundRecording": false,
           "enableBackgroundPlayback": true
         }
-      ]
+      ],
+      "react-native-maps"
     ],
     "web": {
       "favicon": "./assets/favicon.png"

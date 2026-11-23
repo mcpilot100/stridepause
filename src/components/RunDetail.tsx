@@ -2,6 +2,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { shareRun } from '../exportRun';
+import { RouteLegend, RouteMap } from './RouteMap';
 import { splitsOf } from '../tracking/cues';
 import { formatDuration, formatPace, metersToMiles } from '../tracking/geo';
 import type { SavedRun } from '../tracking/types';
@@ -95,9 +96,8 @@ export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }
         </View>
 
         <Text style={[st.eyebrow, { marginTop: 28 }]}>ROUTE</Text>
-        <View style={[st.card, { alignItems: 'center', paddingVertical: 28 }]}>
-          <Text style={st.empty}>Route map coming soon. Your GPS route is already saved.</Text>
-        </View>
+        <RouteMap run={run} />
+        <RouteLegend />
 
         <Pressable
           onPress={() =>
