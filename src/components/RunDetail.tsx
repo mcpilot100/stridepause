@@ -1,6 +1,7 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { shareRun } from '../exportRun';
 import { splitsOf } from '../tracking/cues';
 import { formatDuration, formatPace, metersToMiles } from '../tracking/geo';
 import type { SavedRun } from '../tracking/types';
@@ -71,6 +72,7 @@ export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }
                 <Text style={[st.cellMile, st.headText]}>MILE</Text>
                 <Text style={[st.cell, st.headText]}>SPLIT</Text>
                 <Text style={[st.cell, st.headText]}>PACE / MI</Text>
+                <Text style={[st.cell, st.headText]}>PAUSED</Text>
               </View>
               {splits.map((x) => (
                 <View key={x.mile} style={st.splitRow}>
@@ -83,6 +85,9 @@ export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }
                   <Text style={st.cell}>
                     {formatPace(x.ms, x.miles * 1609.344)}
                   </Text>
+                  <Text style={[st.cell, x.pausedMs > 0 ? st.pausedCell : st.mutedCell]}>
+                    {x.pausedMs > 0 ? formatDuration(x.pausedMs) : '–'}
+                  </Text>
                 </View>
               ))}
             </>
@@ -93,6 +98,19 @@ export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }
         <View style={[st.card, { alignItems: 'center', paddingVertical: 28 }]}>
           <Text style={st.empty}>Route map coming soon. Your GPS route is already saved.</Text>
         </View>
+
+        <Pressable
+          onPress={() =>
+            shareRun(run).catch((e) => Alert.alert('Could not share run', String(e)))
+          }
+          style={({ pressed }) => [st.share, pressed && { opacity: 0.7 }]}
+        >
+          <Text style={st.shareText}>Share run data</Text>
+        </Pressable>
+        <Text style={st.shareHint}>
+          Sends this run's GPS file ({run.points.length.toLocaleString()} points) so it can be
+          checked for accuracy.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -146,4 +164,16 @@ const st = StyleSheet.create({
   headText: { color: C.muted, fontSize: 10, letterSpacing: 1.5 },
   cellMile: { flex: 1.2, color: C.text, fontSize: 15, ...mono },
   cell: { flex: 1, color: C.text, fontSize: 15, textAlign: 'right', ...mono },
+  pausedCell: { color: '#F5B841' },
+  mutedCell: { color: C.muted },
+  share: {
+    marginTop: 28,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.lime,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  shareText: { color: C.lime, fontSize: 15, fontWeight: '700' },
+  shareHint: { color: C.muted, fontSize: 12, marginTop: 8, textAlign: 'center' },
 });

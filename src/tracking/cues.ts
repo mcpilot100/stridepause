@@ -144,24 +144,45 @@ export function ingestPoints(run: ActiveRun, newPoints: TrackPoint[], settings: 
   return phrases;
 }
 
-/** Split times in ms for each full mile, plus the partial last mile. */
+/** Epoch time at which the run had `moving` ms of moving time (inverse of movingMsAt). */
+export function epochAtMoving(run: { startedAt: number; pauses?: { start: number; end: number | null }[] }, moving: number): number {
+  let t = run.startedAt + moving;
+  for (const p of run.pauses ?? []) {
+    if (p.start >= t) break;
+    t += (p.end ?? p.start) - p.start;
+  }
+  return t;
+}
+
+/** Split times in ms for each full mile, plus the partial last mile, with paused time per mile. */
 export function splitsOf(run: {
   startedAt: number;
   mileMoving?: number[];
   mileTimes?: number[];
   distanceM?: number;
   movingMs?: number;
+  endedAt?: number;
+  pauses?: { start: number; end: number | null }[];
 }) {
   // Runs from v0.2 stored epoch times per mile (no auto-pause back then).
   const miles = run.mileMoving ?? run.mileTimes?.map((t) => t - run.startedAt) ?? [];
-  const splits = miles.map((m, i) => ({ mile: i + 1, ms: m - (i ? miles[i - 1] : 0), miles: 1 }));
+  const pausedAt = (t: number) => pausedMsAt(run as ActiveRun, t);
+  const edges = [run.startedAt, ...miles.map((m) => epochAtMoving(run, m))];
+  const splits = miles.map((m, i) => ({
+    mile: i + 1,
+    ms: m - (i ? miles[i - 1] : 0),
+    miles: 1,
+    pausedMs: pausedAt(edges[i + 1]) - pausedAt(edges[i]),
+  }));
   const totalMiles = (run.distanceM ?? 0) / METERS_PER_MILE;
   const rest = totalMiles - miles.length;
   if (rest >= 0.05 && run.movingMs != null) {
+    const endT = run.endedAt ?? epochAtMoving(run, run.movingMs);
     splits.push({
       mile: miles.length + 1,
       ms: run.movingMs - (miles.length ? miles[miles.length - 1] : 0),
       miles: rest,
+      pausedMs: pausedAt(endT) - pausedAt(edges[edges.length - 1]),
     });
   }
   return splits;
