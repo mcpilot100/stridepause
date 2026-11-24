@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { shareRun } from '../exportRun';
+import { RouteLegend, RouteMap } from './RouteMap';
 import { updateSettings } from '../settings';
 import { METERS_PER_MILE } from '../tracking/constants';
 import { splitsOf } from '../tracking/cues';
@@ -138,9 +139,8 @@ export function RunDetail({
         ) : (
           <>
             <Text style={[st.eyebrow, { marginTop: 28 }]}>ROUTE</Text>
-            <View style={[st.card, { alignItems: 'center', paddingVertical: 28 }]}>
-              <Text style={st.empty}>Route map coming soon. Your GPS route is already saved.</Text>
-            </View>
+            <RouteMap run={run} />
+            <RouteLegend />
           </>
         )}
 

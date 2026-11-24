@@ -65,6 +65,7 @@
           "enableBackgroundPlayback": true
         }
       ],
+      "react-native-maps",
       [
         "expo-sensors",
         {
