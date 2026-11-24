@@ -1,10 +1,25 @@
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { shareRun } from '../exportRun';
 import { RouteLegend, RouteMap } from './RouteMap';
+import { updateSettings } from '../settings';
+import { METERS_PER_MILE } from '../tracking/constants';
 import { splitsOf } from '../tracking/cues';
 import { formatDuration, formatPace, metersToMiles } from '../tracking/geo';
+import { calibrateRun } from '../tracking/runStore';
+import { averageCadence, metersToInches } from '../tracking/treadmill';
 import type { SavedRun } from '../tracking/types';
 
 const C = {
@@ -21,7 +36,16 @@ export function runMovingMs(r: SavedRun): number {
   return r.movingMs ?? r.endedAt - r.startedAt;
 }
 
-export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }) {
+export function RunDetail({
+  run,
+  onBack,
+  onChange,
+}: {
+  run: SavedRun;
+  onBack: () => void;
+  onChange?: (run: SavedRun) => void;
+}) {
+  const treadmill = run.mode === 'treadmill';
   const moving = runMovingMs(run);
   const paused = run.pausedMs ?? 0;
   const splits = splitsOf({ ...run, movingMs: moving });
@@ -32,7 +56,8 @@ export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }
 
   return (
     <SafeAreaView style={st.root}>
-      <ScrollView contentContainerStyle={st.content}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView contentContainerStyle={st.content} keyboardShouldPersistTaps="handled">
         <Pressable onPress={onBack} hitSlop={12}>
           <Text style={st.back}>‹ Back</Text>
         </Pressable>
@@ -47,6 +72,7 @@ export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }
               minute: '2-digit',
             })
             .toUpperCase()}
+          {treadmill ? '  ·  TREADMILL' : ''}
         </Text>
         <Text style={st.big}>
           {metersToMiles(run.distanceM).toFixed(2)}
@@ -58,6 +84,19 @@ export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }
           <Stat label="MOVING" value={formatDuration(moving)} />
           <Stat label="PAUSED" value={formatDuration(paused)} />
         </View>
+        {treadmill ? (
+          <View style={[st.stats, { marginTop: 10 }]}>
+            <Stat label="STEPS" value={(run.countedSteps ?? 0).toLocaleString()} />
+            <Stat
+              label="CADENCE"
+              value={`${averageCadence(run.countedSteps, moving) ?? '–'}`}
+            />
+            <Stat
+              label="STRIDE"
+              value={run.strideM ? `${metersToInches(run.strideM).toFixed(1)}″` : '–'}
+            />
+          </View>
+        ) : null}
 
         <Text style={[st.eyebrow, { marginTop: 28 }]}>SPLITS</Text>
         <View style={st.card}>
@@ -95,9 +134,15 @@ export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }
           )}
         </View>
 
-        <Text style={[st.eyebrow, { marginTop: 28 }]}>ROUTE</Text>
-        <RouteMap run={run} />
-        <RouteLegend />
+        {treadmill ? (
+          <Calibrate run={run} onChange={onChange} />
+        ) : (
+          <>
+            <Text style={[st.eyebrow, { marginTop: 28 }]}>ROUTE</Text>
+            <RouteMap run={run} />
+            <RouteLegend />
+          </>
+        )}
 
         <Pressable
           onPress={() =>
@@ -108,11 +153,94 @@ export function RunDetail({ run, onBack }: { run: SavedRun; onBack: () => void }
           <Text style={st.shareText}>Share run data</Text>
         </Pressable>
         <Text style={st.shareHint}>
-          Sends this run's GPS file ({run.points.length.toLocaleString()} points) so it can be
-          checked for accuracy.
+          {treadmill
+            ? `Sends this run's step data (${(run.stepSamples?.length ?? 0).toLocaleString()} readings) so it can be checked for accuracy.`
+            : `Sends this run's GPS file (${run.points.length.toLocaleString()} points) so it can be checked for accuracy.`}
         </Text>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+/**
+ * Treadmill calibration: enter the real distance (treadmill screen or a known course).
+ * The run is recalculated and the new stride is saved for future treadmill runs.
+ */
+function Calibrate({ run, onChange }: { run: SavedRun; onChange?: (run: SavedRun) => void }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const steps = run.countedSteps ?? 0;
+
+  const save = async () => {
+    const miles = parseFloat(text.replace(',', '.'));
+    if (!isFinite(miles) || miles <= 0) {
+      Alert.alert('Enter a distance', 'Type the distance in miles, for example 3.10.');
+      return;
+    }
+    const strideM = (miles * METERS_PER_MILE) / steps;
+    const inches = metersToInches(strideM);
+    if (inches < 15 || inches > 80) {
+      Alert.alert(
+        'That looks off',
+        `${miles} mi over ${steps.toLocaleString()} steps would be a ${inches.toFixed(0)} in stride. Check the distance and try again.`,
+      );
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await calibrateRun(run.id, miles * METERS_PER_MILE);
+      if (!res) throw new Error('This run has no steps to calibrate from.');
+      await updateSettings({ strideM: res.strideM, strideCalibratedAt: Date.now() });
+      onChange?.(res.run);
+      setText('');
+      setDone(
+        `Stride set to ${metersToInches(res.strideM).toFixed(1)} in. This run is updated and future treadmill runs will use it.`,
+      );
+    } catch (e) {
+      Alert.alert('Could not calibrate', String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <Text style={[st.eyebrow, { marginTop: 28 }]}>CALIBRATE STRIDE</Text>
+      <View style={[st.card, { paddingVertical: 14 }]}>
+        {steps < 100 ? (
+          <Text style={st.empty}>Not enough steps on this run to calibrate from.</Text>
+        ) : (
+          <>
+            <Text style={st.calText}>
+              What distance did the treadmill's screen show (or the known course you ran)?
+            </Text>
+            <View style={st.calRow}>
+              <TextInput
+                value={text}
+                onChangeText={setText}
+                placeholder={metersToMiles(run.distanceM).toFixed(2)}
+                placeholderTextColor={C.muted}
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+                onSubmitEditing={save}
+                style={st.input}
+              />
+              <Text style={st.calUnit}>mi</Text>
+              <Pressable
+                disabled={busy || !text}
+                onPress={save}
+                style={({ pressed }) => [st.calButton, (pressed || busy || !text) && { opacity: 0.5 }]}
+              >
+                <Text style={st.calButtonText}>Calibrate</Text>
+              </Pressable>
+            </View>
+            {done ? <Text style={st.calDone}>{done}</Text> : null}
+          </>
+        )}
+      </View>
+    </>
   );
 }
 
@@ -175,5 +303,23 @@ const st = StyleSheet.create({
     alignItems: 'center',
   },
   shareText: { color: C.lime, fontSize: 15, fontWeight: '700' },
+  calText: { color: C.muted, fontSize: 13, lineHeight: 18 },
+  calRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+  input: {
+    flex: 1,
+    color: C.text,
+    fontSize: 20,
+    fontWeight: '700',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    ...mono,
+  },
+  calUnit: { color: C.muted, fontSize: 15, marginLeft: 8, marginRight: 12 },
+  calButton: { backgroundColor: C.lime, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 16 },
+  calButtonText: { color: C.bg, fontSize: 14, fontWeight: '700' },
+  calDone: { color: C.lime, fontSize: 13, marginTop: 12, lineHeight: 18 },
   shareHint: { color: C.muted, fontSize: 12, marginTop: 8, textAlign: 'center' },
 });

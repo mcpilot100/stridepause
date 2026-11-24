@@ -17,6 +17,20 @@ Built with [Expo](https://expo.dev) (React Native), so one codebase covers both 
 - **Android:** tracking runs in a foreground service with a persistent "StridePause is tracking your run" notification. That's what stops Android from killing it behind other apps.
 - GPS fixes are handled by a background task (`src/tracking/locationTask.ts`) and saved to phone storage straight away, so nothing is lost if the screen is off.
 
+## Treadmill mode
+
+For indoor runs, including curved, self-powered treadmills (air runners) where there's no belt speed to read. Pick **Treadmill** above the pace ring before you start.
+
+- **Distance = steps × stride length.** No GPS is used for distance.
+  - iPhone: steps come from Core Motion, which keeps counting on its own chip even while the app sleeps, so nothing is missed.
+  - Android: a small native module (`modules/step-counter`) listens to the phone's hardware step counter. Unlike expo-sensors' Pedometer, it keeps listening when the app is in the background.
+- **Background:** treadmill runs use the same background location service as outdoor runs (Android notification, iPhone location pill). The GPS fixes are thrown away; the service is only there to keep the app awake and read the step counter about once a second.
+- **Auto-pause:** no steps for 8 seconds pauses the run (back-dated to your last step). Six steps in a row resumes it. The wait before your first steps isn't counted or announced.
+- **Calibration:** the stride starts at an estimated 39.4 in (1.0 m). After a run, open it under Saved runs and enter the distance from the treadmill's screen (or a known course). The run is recalculated and the new stride is used for future treadmill runs. Recalibrate anytime.
+- Keep the phone on your body (pocket, waistband, armband). On the treadmill console it won't see any steps.
+
+Treadmill mode needs a new build (it adds a native module and the Motion & Fitness / Physical activity permission), so it won't work in an older build or in Expo Go.
+
 ## Testing step 1 on your phone
 
 You need a free [Expo account](https://expo.dev/signup). Run these from this folder:
@@ -53,4 +67,7 @@ src/tracking/locationTask.ts background GPS task
 src/tracking/controller.ts   permissions, start, stop
 src/tracking/runStore.ts     saves the active run and run history on the phone
 src/tracking/geo.ts          distance, pace and time formatting
+src/tracking/treadmill.ts    treadmill distance, auto-pause and calibration replay
+src/tracking/steps.ts        step counter (Core Motion on iPhone, native module on Android)
+modules/step-counter/        Android background step counter (local Expo module)
 ```

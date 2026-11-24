@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import type { RunMode } from './tracking/types';
+
 export type FuelMode = 'time' | 'distance';
 
 export type Settings = {
@@ -9,7 +11,16 @@ export type Settings = {
   fuelMinutes: number;
   fuelMiles: number;
   fuelMessage: string;
+  /** Outdoor (GPS) or treadmill (steps × stride). */
+  runMode: RunMode;
+  /** Meters per step for treadmill runs. */
+  strideM: number;
+  /** When the stride was last calibrated from a known distance (epoch ms), or null if estimated. */
+  strideCalibratedAt: number | null;
 };
+
+/** About 39 in per step: a typical easy-run step before calibration. */
+export const DEFAULT_STRIDE_M = 1.0;
 
 export const FUEL_MESSAGES = [
   'Time to refuel',
@@ -28,6 +39,9 @@ export const DEFAULT_SETTINGS: Settings = {
   fuelMinutes: 30,
   fuelMiles: 3,
   fuelMessage: 'Time for a gel',
+  runMode: 'outdoor',
+  strideM: DEFAULT_STRIDE_M,
+  strideCalibratedAt: null,
 };
 
 const KEY = 'stridepause/settings';
@@ -43,4 +57,14 @@ export async function loadSettings(): Promise<Settings> {
 
 export async function saveSettings(s: Settings): Promise<void> {
   await AsyncStorage.setItem(KEY, JSON.stringify(s));
+}
+
+/**
+ * Merges `patch` into the saved settings. Screens keep their own copy of the settings,
+ * so saving a whole stale copy could undo a change made elsewhere (e.g. a new stride).
+ */
+export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
+  const next = { ...(await loadSettings()), ...patch };
+  await saveSettings(next);
+  return next;
 }
