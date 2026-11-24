@@ -5,8 +5,19 @@ import * as TaskManager from 'expo-task-manager';
 
 import { LOCATION_TASK } from './constants';
 import { say } from '../speech';
-import { appendPoints } from './runStore';
+import { appendPoints, tickSteps } from './runStore';
+import { onStep } from './steps';
 import type { TrackPoint } from './types';
+
+// Treadmill mode on Android: each step event updates the run, so distance and voice cues
+// keep up even when location updates are sparse indoors. (iPhone uses the location
+// heartbeat below.) Registered here so it is in place even when the OS starts the app's
+// JS in the background with no screen.
+onStep(() => {
+  tickSteps()
+    .then((phrases) => phrases.forEach((p) => say(p)))
+    .catch((e) => console.warn('[StridePause] step tick', e));
+});
 
 TaskManager.defineTask<{ locations: LocationObject[] }>(
   LOCATION_TASK,

@@ -103,20 +103,35 @@ export function ingestPoints(run: ActiveRun, newPoints: TrackPoint[], settings: 
 
     run.lastGood = p;
     if (!prev) continue;
-    const step = haversineM(prev, p);
-    const before: number = run.distanceM;
-    const after = before + step;
-    run.distanceM = after;
-    // Record moving time at each mile boundary, interpolated between fixes.
-    while (after >= (run.mileMoving.length + 1) * METERS_PER_MILE) {
-      const boundary = (run.mileMoving.length + 1) * METERS_PER_MILE;
-      const frac = step > 0 ? (boundary - before) / step : 1;
-      run.mileMoving.push(movingMsAt(run, prev.t + frac * (p.t - prev.t)));
-    }
+    addMovingDistance(run, haversineM(prev, p), prev.t, p.t);
   }
 
   const last = newPoints[newPoints.length - 1];
-  const now = last ? last.t : Date.now();
+  return [...phrases, ...dueCues(run, milesBefore, last ? last.t : Date.now(), settings)];
+}
+
+/**
+ * Adds `meters` covered between t0 and t1 to the run's moving distance, recording the
+ * moving time at each mile boundary (interpolated within the interval).
+ */
+export function addMovingDistance(run: ActiveRun, meters: number, t0: number, t1: number) {
+  run.distanceM ??= 0;
+  run.mileMoving ??= [];
+  const before = run.distanceM;
+  const after = before + meters;
+  run.distanceM = after;
+  while (after >= (run.mileMoving.length + 1) * METERS_PER_MILE) {
+    const boundary = (run.mileMoving.length + 1) * METERS_PER_MILE;
+    const frac = meters > 0 ? (boundary - before) / meters : 1;
+    run.mileMoving.push(movingMsAt(run, t0 + frac * (t1 - t0)));
+  }
+}
+
+/** Mile updates and fuel reminders that became due since `milesBefore` miles. */
+export function dueCues(run: ActiveRun, milesBefore: number, now: number, settings: Settings): string[] {
+  run.mileMoving ??= [];
+  run.fuelCount ??= 0;
+  const phrases: string[] = [];
 
   // Per-mile update.
   if (settings.voiceMiles && run.mileMoving.length > milesBefore) {
