@@ -2,7 +2,7 @@
   "expo": {
     "name": "StridePause",
     "slug": "stridepause",
-    "version": "0.3.1",
+    "version": "0.4.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -30,7 +30,8 @@
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACTIVITY_RECOGNITION"
       ]
     },
     "plugins": [
@@ -40,7 +41,7 @@
           "locationWhenInUsePermission": "StridePause uses your location to measure your pace, distance and route while you run.",
           "locationAlwaysAndWhenInUsePermission": "Choose \"Always\" so StridePause keeps tracking your run when the app is minimized or you switch to music.",
           "locationAlwaysPermission": "Choose \"Always\" so StridePause keeps tracking your run when the app is minimized or you switch to music.",
-          "motionUsagePermission": false,
+          "motionUsagePermission": "StridePause counts your steps to measure distance and pace on the treadmill, where GPS doesn't work.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
@@ -62,6 +63,12 @@
           "recordAudioAndroid": false,
           "enableBackgroundRecording": false,
           "enableBackgroundPlayback": true
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "StridePause counts your steps to measure distance and pace on the treadmill, where GPS doesn't work."
         }
       ]
     ],

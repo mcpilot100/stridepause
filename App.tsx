@@ -12,7 +12,10 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { RunDetail, runMovingMs } from './src/components/RunDetail';
+import { TreadmillCard } from './src/components/TreadmillCard';
 import { VoiceSettings } from './src/components/VoiceSettings';
+import { DEFAULT_SETTINGS, loadSettings, updateSettings, type Settings } from './src/settings';
+import { say } from './src/speech';
 import { movingMsAt, pausedMsAt } from './src/tracking/cues';
 import {
   ensurePermissions,
@@ -21,8 +24,9 @@ import {
   stopTracking,
 } from './src/tracking/controller';
 import { formatDuration, formatPace, metersToMiles, totalDistanceM } from './src/tracking/geo';
-import { getActiveRun, getRunHistory } from './src/tracking/runStore';
-import type { ActiveRun, SavedRun } from './src/tracking/types';
+import { getActiveRun, getRunHistory, tickSteps } from './src/tracking/runStore';
+import { currentCadence } from './src/tracking/treadmill';
+import type { ActiveRun, RunMode, SavedRun } from './src/tracking/types';
 
 const C = {
   bg: '#0B0F0A',
@@ -51,8 +55,20 @@ function RunScreen() {
   const [history, setHistory] = useState<SavedRun[]>([]);
   const [openRun, setOpenRun] = useState<SavedRun | null>(null);
   const [busy, setBusy] = useState(false);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+
+  const reloadSettings = useCallback(() => loadSettings().then(setSettings), []);
+  const setMode = (runMode: RunMode) => {
+    setSettings({ ...settings, runMode });
+    updateSettings({ runMode });
+  };
 
   const refresh = useCallback(async () => {
+    // Treadmill: read the step counter now too, so the screen stays live between
+    // background heartbeats. Any cue that falls due here is spoken like any other.
+    await tickSteps()
+      .then((phrases) => phrases.forEach((p) => say(p)))
+      .catch(() => undefined);
     const [active, on] = await Promise.all([getActiveRun(), isTracking()]);
     setRun(active);
     setTracking(on && !!active);
@@ -62,21 +78,25 @@ function RunScreen() {
 
   useEffect(() => {
     refresh();
+    reloadSettings();
     getRunHistory().then(setHistory);
     const id = setInterval(refresh, 1000);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [refresh, reloadSettings]);
 
   const onStart = async () => {
     setBusy(true);
     try {
-      const perm = await ensurePermissions();
-      if (perm !== 'ok') {
+      const mode = settings.runMode;
+      const perm = await ensurePermissions(mode);
+      if (perm === 'motion-unavailable') {
+        Alert.alert('No step counter', "This phone doesn't have a step counter, so treadmill mode can't measure distance.");
+        return;
+      }
+      if (perm === 'motion-denied') {
         Alert.alert(
-          'Location needed',
-          perm === 'background-denied'
-            ? 'To keep tracking when the app is minimized, set Location to "Always" (iPhone) or "Allow all the time" (Android).'
-            : 'StridePause needs your location to track your run.',
+          'Motion & Fitness needed',
+          'Treadmill mode counts your steps to measure distance. Allow Motion & Fitness (iPhone) or Physical activity (Android) for StridePause.',
           [
             { text: 'Not now', style: 'cancel' },
             { text: 'Open Settings', onPress: () => Linking.openSettings() },
@@ -84,7 +104,22 @@ function RunScreen() {
         );
         return;
       }
-      await startTracking();
+      if (perm !== 'ok') {
+        Alert.alert(
+          'Location needed',
+          perm === 'background-denied'
+            ? 'To keep tracking when the app is minimized, set Location to "Always" (iPhone) or "Allow all the time" (Android).'
+            : mode === 'treadmill'
+              ? 'Treadmill mode ignores GPS, but location access is what keeps StridePause running when the app is minimized.'
+              : 'StridePause needs your location to track your run.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ],
+        );
+        return;
+      }
+      await startTracking(mode, settings.strideM);
       await refresh();
     } catch (e) {
       Alert.alert('Could not start tracking', String(e));
@@ -111,8 +146,25 @@ function RunScreen() {
   const isPaused = tracking && !!run?.paused;
   const lastFix = points.length ? points[points.length - 1] : null;
   const lastFixAge = lastFix ? Math.max(0, Math.round((now - lastFix.t) / 1000)) : null;
+  // While a run is going, show the mode of that run; otherwise the selected mode.
+  const treadmill = (tracking && run ? run.mode : settings.runMode) === 'treadmill';
+  const cadence = treadmill && run ? currentCadence(run, now) : null;
+  const steps = run?.countedSteps ?? 0;
 
-  if (openRun) return <RunDetail run={openRun} onBack={() => setOpenRun(null)} />;
+  if (openRun)
+    return (
+      <RunDetail
+        run={openRun}
+        onBack={() => {
+          setOpenRun(null);
+          reloadSettings();
+        }}
+        onChange={(r) => {
+          setOpenRun(r);
+          setHistory((h) => h.map((x) => (x.id === r.id ? r : x)));
+        }}
+      />
+    );
 
   return (
     <SafeAreaView style={s.root}>
@@ -120,6 +172,24 @@ function RunScreen() {
       <ScrollView contentContainerStyle={s.content}>
         <Text style={s.eyebrow}>STRIDE</Text>
         <Text style={s.title}>Today's run</Text>
+
+        <View style={[s.seg, tracking && { opacity: 0.5 }]}>
+          {(['outdoor', 'treadmill'] as const).map((m) => {
+            const on = (tracking && run ? run.mode ?? 'outdoor' : settings.runMode) === m;
+            return (
+              <Pressable
+                key={m}
+                disabled={tracking || busy}
+                onPress={() => setMode(m)}
+                style={[s.segItem, on && { backgroundColor: C.lime }]}
+              >
+                <Text style={[s.segText, on && { color: C.bg }]}>
+                  {m === 'outdoor' ? 'OUTDOOR' : 'TREADMILL'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
         <View style={s.statusRow}>
           <View
@@ -130,15 +200,24 @@ function RunScreen() {
               ? 'READY'
               : isPaused
                 ? 'AUTO-PAUSED'
-                : lastFixAge == null || lastFixAge > 10
-                  ? 'WAITING FOR GPS'
-                  : 'TRACKING'}
+                : treadmill
+                  ? steps > 0
+                    ? 'COUNTING STEPS'
+                    : 'WAITING FOR STEPS'
+                  : lastFixAge == null || lastFixAge > 10
+                    ? 'WAITING FOR GPS'
+                    : 'TRACKING'}
           </Text>
         </View>
 
         <View style={s.ring}>
           <Text style={s.pace}>{formatPace(moving, distanceM)}</Text>
           <Text style={s.ringLabel}>AVG PACE / MI</Text>
+          {treadmill && tracking ? (
+            <Text style={s.cadence}>
+              {cadence != null ? `${cadence} spm` : '– spm'} · {steps.toLocaleString()} steps
+            </Text>
+          ) : null}
         </View>
 
         <View style={s.stats}>
@@ -161,6 +240,12 @@ function RunScreen() {
           </Text>
         </Pressable>
 
+        {treadmill && !tracking ? (
+          <View style={{ marginTop: 28 }}>
+            <TreadmillCard settings={settings} />
+          </View>
+        ) : null}
+
         <View style={{ marginTop: 28 }}>
           <VoiceSettings />
         </View>
@@ -181,6 +266,7 @@ function RunScreen() {
                     hour: 'numeric',
                     minute: '2-digit',
                   })}
+                  {r.mode === 'treadmill' ? '  ·  TREADMILL' : ''}
                 </Text>
                 <Text style={s.historyMain}>
                   {metersToMiles(r.distanceM).toFixed(2)} mi ·{' '}
@@ -228,6 +314,17 @@ const s = StyleSheet.create({
   },
   pace: { color: C.text, fontSize: 56, fontWeight: '700', ...mono },
   ringLabel: { color: C.muted, fontSize: 11, letterSpacing: 2, marginTop: 6 },
+  cadence: { color: C.lime, fontSize: 13, marginTop: 10, ...mono },
+  seg: {
+    flexDirection: 'row',
+    marginTop: 16,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 3,
+  },
+  segItem: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 999 },
+  segText: { color: C.muted, fontSize: 12, fontWeight: '700', letterSpacing: 1.5 },
   stats: {
     flexDirection: 'row',
     marginTop: 24,

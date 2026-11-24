@@ -7,7 +7,7 @@ import {
   FUEL_MILE_OPTIONS,
   FUEL_MINUTE_OPTIONS,
   loadSettings,
-  saveSettings,
+  updateSettings,
   type Settings,
 } from '../settings';
 import { say } from '../speech';
@@ -31,7 +31,7 @@ export function VoiceSettings() {
   const update = (patch: Partial<Settings>) => {
     const next = { ...s, ...patch };
     setS(next);
-    saveSettings(next);
+    updateSettings(patch);
   };
 
   return (
